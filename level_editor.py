@@ -1,4 +1,5 @@
 import bpy
+import math
 
 # blenderに登録するアドオン情報 
 bl_info = {
@@ -14,6 +15,7 @@ bl_info = {
     "category": "Object"
 }
 
+
 # アドオン有効化時コールバック
 def register():
     # Blenderにクラスを登録
@@ -23,6 +25,7 @@ def register():
     #メニューに項目を追加
     bpy.types.TOPBAR_MT_editor_menus.append(TOPBAR_MT_my_menu.submenu)
     print("レベルエディタが有効化されました。")
+
 
 # アドオン無効化時コールバック
 def unregister():
@@ -34,9 +37,6 @@ def unregister():
         bpy.utils.unregister_class(cls)
     print("レベルエディタが無効化されました。")
 
-# テスト実行用コード
-if __name__ == "__main__":
-    register()
 
 # メニュー項目描画
 def draw_menu_manual(self, context):
@@ -45,6 +45,7 @@ def draw_menu_manual(self, context):
 
     #トップバーの「エディターメニュー」に項目（オペレータ）を追加
     self.layout.operator("wm.url_open_perset", text="Manual", icon='HELP')
+
 
 #トップバーの拡張メニュー
 class TOPBAR_MT_my_menu(bpy.types.Menu):
@@ -59,11 +60,12 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
     def draw(self, context):
 
         #トップバーの「エディターメニュー」に項目（オペレータ）を追加
-        self.layout.operator(MYDDON_OT_stretch_vertex.bl_idname,
-                             text=MYDDON_OT_stretch_vertex.bl_label)
+        self.layout.operator(MYADDON_OT_stretch_vertex.bl_idname,
+                             text=MYADDON_OT_stretch_vertex.bl_label)
         self.layout.operator(MYADDON_OT_create_ico_sphere.bl_idname,
                              text=MYADDON_OT_create_ico_sphere.bl_label)
-
+        self.layout.operator(MYADDON_OT_export_scene.bl_idname,
+                             text=MYADDON_OT_export_scene.bl_label)
         
     # 既存のメニューにサブメニューを追加
     def submenu(self, context):
@@ -71,8 +73,9 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
         # ID指定でサブメニューを追加
         self.layout.menu(TOPBAR_MT_my_menu.bl_idname)
 
+
 #オペレータ 頂点を伸ばす
-class MYDDON_OT_stretch_vertex(bpy.types.Operator):
+class  MYADDON_OT_stretch_vertex(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_stretch_vertex"
     bl_label = "頂点を伸ばす"
     bl_description = "頂点座標を引っ張って伸ばします"
@@ -101,10 +104,58 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
         print("ICO球を生成しました。")
 
         return {'FINISHED'}
+    
+
+# オペレータ シーン出力
+class MYADDON_OT_export_scene(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_export_scene"
+    bl_label = "シーン出力"
+    bl_description = "シーン情報をExportします"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        print("シーン情報をExportします")
+
+        # シーン内の全オブジェクトを走査
+        for obj in bpy.context.scene.objects:
+            print(obj.type + " - " + obj.name)
+
+            # ローカルトランスフォームを分解
+            trans, rot, scale = obj.matrix_local.decompose()
+
+            # クォータニオンからオイラー角へ変換
+            rot = rot.to_euler()
+
+            # ラジアンから度数法へ変換
+            rot.x = math.degrees(rot.x)
+            rot.y = math.degrees(rot.y)
+            rot.z = math.degrees(rot.z)
+
+            # トランスフォーム情報を表示
+            print("Trans(%f, %f, %f)" % (trans.x, trans.y, trans.z))
+            print("Rot(%f, %f, %f)" % (rot.x, rot.y, rot.z))
+            print("Scale(%f, %f, %f)" % (scale.x, scale.y, scale.z))
+
+            # 親オブジェクトがある場合のみ表示
+            if obj.parent:
+                print("Parent: " + obj.parent.name)
+
+            # オブジェクトごとの区切り
+            print("")
+
+        print("シーン情報をExportしました")
+        self.report({'INFO'}, "シーン情報をExportしました")
+
+        return {'FINISHED'}
 
 # Blenderに登録するクラスリスト
 classes = (
-    MYDDON_OT_stretch_vertex,
+    MYADDON_OT_stretch_vertex,
     MYADDON_OT_create_ico_sphere,
+    MYADDON_OT_export_scene,
     TOPBAR_MT_my_menu,
     )
+
+# テスト実行用コード
+if __name__ == "__main__":
+    register()
