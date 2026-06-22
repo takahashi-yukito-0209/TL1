@@ -1,5 +1,6 @@
 import bpy
 import math
+import bpy_extras
 
 # blenderに登録するアドオン情報 
 bl_info = {
@@ -47,7 +48,7 @@ def draw_menu_manual(self, context):
     self.layout.operator("wm.url_open_perset", text="Manual", icon='HELP')
 
 
-#トップバーの拡張メニュー
+# トップバーの拡張メニュー
 class TOPBAR_MT_my_menu(bpy.types.Menu):
     #Blenderがクラスを識別するための固有の文字列
     bl_idname = "TOPBAR_MT_my_menu"
@@ -74,7 +75,7 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
         self.layout.menu(TOPBAR_MT_my_menu.bl_idname)
 
 
-#オペレータ 頂点を伸ばす
+# オペレータ 頂点を伸ばす
 class  MYADDON_OT_stretch_vertex(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_stretch_vertex"
     bl_label = "頂点を伸ばす"
@@ -91,7 +92,7 @@ class  MYADDON_OT_stretch_vertex(bpy.types.Operator):
         return {'FINISHED'}
 
 
-#オペレータ ICO球生成
+# オペレータ ICO球生成
 class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_create_object"
     bl_label = "ICO球生成"
@@ -107,41 +108,84 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
     
 
 # オペレータ シーン出力
-class MYADDON_OT_export_scene(bpy.types.Operator):
+class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
     bl_idname = "myaddon.myaddon_ot_export_scene"
     bl_label = "シーン出力"
     bl_description = "シーン情報をExportします"
     bl_options = {'REGISTER', 'UNDO'}
 
+    # 出力するファイルの拡張子
+    filename_ext = ".scene"
+
+    def write_and_print(self, file, text):
+        """コンソールとファイルに同じ文字列を出力する"""
+
+        print(text)
+        file.write(text)
+        file.write('\n')
+
+    def parse_scene_recursive(self, file, object, level):
+        """オブジェクト1個分の情報を出力し、子オブジェクトを再帰的に処理する"""
+
+        # 階層の深さに応じてインデントを作成
+        indent = ''
+        for i in range(level):
+            indent += '\t'
+
+        # オブジェクト名を書き込み
+        self.write_and_print(file, indent + object.type + " - " + object.name)
+
+        # ローカルトランスフォームを分解
+        trans, rot, scale = object.matrix_local.decompose()
+
+        # クォータニオンからオイラー角へ変換
+        rot = rot.to_euler()
+
+        # ラジアンから度数法へ変換
+        rot.x = math.degrees(rot.x)
+        rot.y = math.degrees(rot.y)
+        rot.z = math.degrees(rot.z)
+
+        # トランスフォーム情報を出力
+        self.write_and_print(file, indent + "Trans(%f, %f, %f)" % (trans.x, trans.y, trans.z))
+        self.write_and_print(file, indent + "Rot(%f, %f, %f)" % (rot.x, rot.y, rot.z))
+        self.write_and_print(file, indent + "Scale(%f, %f, %f)" % (scale.x, scale.y, scale.z))
+
+        # オブジェクトごとの区切り
+        self.write_and_print(file, "")
+
+        # 子オブジェクトを再帰的に処理
+        for child in object.children:
+            self.parse_scene_recursive(file, child, level + 1)
+
+    def export(self):
+        """シーン内のオブジェクト情報をファイルに出力する"""
+
+        print("シーン情報出力開始… %r" % self.filepath)
+
+        # ファイルをテキスト形式で書き出し用にオープン
+        with open(self.filepath, "wt") as file:
+
+            # シーン開始文字列を書き込み
+            self.write_and_print(file, "SCENE")
+
+            # シーン内の全オブジェクトを走査
+            for object in bpy.context.scene.objects:
+
+                # 親オブジェクトがある場合は、再帰処理側で出力するためスキップ
+                if object.parent:
+                    continue
+
+                # ルート直下のオブジェクトから再帰的に出力
+                self.parse_scene_recursive(file, object, 0)
+
     def execute(self, context):
+        """シーン出力処理を実行する"""
+
         print("シーン情報をExportします")
 
-        # シーン内の全オブジェクトを走査
-        for obj in bpy.context.scene.objects:
-            print(obj.type + " - " + obj.name)
-
-            # ローカルトランスフォームを分解
-            trans, rot, scale = obj.matrix_local.decompose()
-
-            # クォータニオンからオイラー角へ変換
-            rot = rot.to_euler()
-
-            # ラジアンから度数法へ変換
-            rot.x = math.degrees(rot.x)
-            rot.y = math.degrees(rot.y)
-            rot.z = math.degrees(rot.z)
-
-            # トランスフォーム情報を表示
-            print("Trans(%f, %f, %f)" % (trans.x, trans.y, trans.z))
-            print("Rot(%f, %f, %f)" % (rot.x, rot.y, rot.z))
-            print("Scale(%f, %f, %f)" % (scale.x, scale.y, scale.z))
-
-            # 親オブジェクトがある場合のみ表示
-            if obj.parent:
-                print("Parent: " + obj.parent.name)
-
-            # オブジェクトごとの区切り
-            print("")
+        # ファイルに出力
+        self.export()
 
         print("シーン情報をExportしました")
         self.report({'INFO'}, "シーン情報をExportしました")
