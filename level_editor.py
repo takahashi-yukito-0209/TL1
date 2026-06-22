@@ -1,6 +1,9 @@
 import bpy
 import math
 import bpy_extras
+import gpu
+import gpu_extras.batch
+import copy
 
 # blenderに登録するアドオン情報 
 bl_info = {
@@ -17,6 +20,94 @@ bl_info = {
 }
 
 
+# コライダー描画
+class DrawCollider:
+    # 描画ハンドル
+    draw_handler = None
+
+    @staticmethod
+    def draw_collider():
+        """シーン内の全オブジェクトにコライダー用のワイヤーフレームを描画する"""
+
+        # 頂点データ
+        vertices = {"pos": []}
+
+        # インデックスデータ
+        indices = []
+
+        # 立方体の各頂点へのオフセット
+        offsets = [
+            [-0.5, -0.5, -0.5],
+            [+0.5, -0.5, -0.5],
+            [-0.5, +0.5, -0.5],
+            [+0.5, +0.5, -0.5],
+            [-0.5, -0.5, +0.5],
+            [+0.5, -0.5, +0.5],
+            [-0.5, +0.5, +0.5],
+            [+0.5, +0.5, +0.5],
+        ]
+
+        # 立方体のサイズ
+        collider_size = [2, 2, 2]
+
+        # シーン内の全オブジェクトを走査
+        for scene_object in bpy.context.scene.objects:
+
+            # このオブジェクトの開始頂点番号
+            start_vertex_index = len(vertices["pos"])
+
+            # Boxの8頂点分を追加
+            for offset in offsets:
+
+                # オブジェクト位置をコピー
+                position = copy.copy(scene_object.location)
+
+                # オフセットを加算して頂点座標を作成
+                position[0] += offset[0] * collider_size[0]
+                position[1] += offset[1] * collider_size[1]
+                position[2] += offset[2] * collider_size[2]
+
+                # 頂点データに追加
+                vertices["pos"].append(position)
+
+            # 前面
+            indices.append([start_vertex_index + 0, start_vertex_index + 1])
+            indices.append([start_vertex_index + 1, start_vertex_index + 3])
+            indices.append([start_vertex_index + 3, start_vertex_index + 2])
+            indices.append([start_vertex_index + 2, start_vertex_index + 0])
+
+            # 奥面
+            indices.append([start_vertex_index + 4, start_vertex_index + 5])
+            indices.append([start_vertex_index + 5, start_vertex_index + 7])
+            indices.append([start_vertex_index + 7, start_vertex_index + 6])
+            indices.append([start_vertex_index + 6, start_vertex_index + 4])
+
+            # 前面と奥面をつなぐ辺
+            indices.append([start_vertex_index + 0, start_vertex_index + 4])
+            indices.append([start_vertex_index + 1, start_vertex_index + 5])
+            indices.append([start_vertex_index + 2, start_vertex_index + 6])
+            indices.append([start_vertex_index + 3, start_vertex_index + 7])
+
+        # ビルトインのシェーダを取得
+        shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+
+        # バッチを作成
+        batch = gpu_extras.batch.batch_for_shader(
+            shader,
+            "LINES",
+            vertices,
+            indices=indices
+        )
+
+        # 色を指定
+        color = [0.5, 1.0, 1.0, 1.0]
+        shader.bind()
+        shader.uniform_float("color", color)
+
+        # 描画
+        batch.draw(shader)
+
+
 # アドオン有効化時コールバック
 def register():
     # Blenderにクラスを登録
@@ -25,6 +116,15 @@ def register():
 
     # メニューに項目を追加
     bpy.types.TOPBAR_MT_editor_menus.append(TOPBAR_MT_my_menu.submenu)
+
+    # 3Dビューに描画関数を登録
+    DrawCollider.draw_handler = bpy.types.SpaceView3D.draw_handler_add(
+        DrawCollider.draw_collider,
+        (),
+        "WINDOW",
+        "POST_VIEW"
+    )
+
     print("レベルエディタが有効化されました。")
 
 
@@ -32,6 +132,14 @@ def register():
 def unregister():
     # メニューから項目を削除
     bpy.types.TOPBAR_MT_editor_menus.remove(TOPBAR_MT_my_menu.submenu)
+
+    # 3Dビューから描画関数を解除
+    if DrawCollider.draw_handler is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(
+            DrawCollider.draw_handler,
+            "WINDOW"
+        )
+        DrawCollider.draw_handler = None
 
     # Blenderからクラスを削除
     for addon_class in classes:
@@ -42,27 +150,19 @@ def unregister():
 
 # メニュー項目描画
 def draw_menu_manual(self, context):
-    # self : 呼び出し元のクラスインスタンス。C++でいうthisポインタ
-    # context : カーソルを合わせたときのポップアップのカスタマイズなどに使用
-
     # トップバーの「エディターメニュー」に項目（オペレータ）を追加
     self.layout.operator("wm.url_open_perset", text="Manual", icon='HELP')
 
 
 # トップバーの拡張メニュー
 class TOPBAR_MT_my_menu(bpy.types.Menu):
-    # Blenderがクラスを識別するための固有の文字列
     bl_idname = "TOPBAR_MT_my_menu"
-
-    # メニューのラベルとして表示される文字列
     bl_label = "MyMenu"
-
-    # 著者表示用の文字列
     bl_description = "拡張メニュー by " + bl_info["author"]
 
-    # サブメニューの描画
     def draw(self, context):
-        # トップバーの「エディターメニュー」に項目（オペレータ）を追加
+        """トップバーの拡張メニューを描画する"""
+
         self.layout.operator(
             MYADDON_OT_stretch_vertex.bl_idname,
             text=MYADDON_OT_stretch_vertex.bl_label
@@ -78,9 +178,9 @@ class TOPBAR_MT_my_menu(bpy.types.Menu):
             text=MYADDON_OT_export_scene.bl_label
         )
 
-    # 既存のメニューにサブメニューを追加
     def submenu(self, context):
-        # ID指定でサブメニューを追加
+        """既存メニューへサブメニューを追加する"""
+
         self.layout.menu(TOPBAR_MT_my_menu.bl_idname)
 
 
@@ -89,18 +189,14 @@ class MYADDON_OT_stretch_vertex(bpy.types.Operator):
     bl_idname = "myaddon.myaddon_ot_stretch_vertex"
     bl_label = "頂点を伸ばす"
     bl_description = "頂点座標を引っ張って伸ばします"
-
-    # リドゥ、アンドゥ可能オプション
     bl_options = {'REGISTER', 'UNDO'}
 
-    # メニューを実行したときに呼ばれるコールバック関数
     def execute(self, context):
         """Cubeの先頭頂点をX方向へ移動する"""
 
         bpy.data.objects["Cube"].data.vertices[0].co.x += 1.0
         print("頂点を伸ばしました。")
 
-        # オペレータの命令終了を通知
         return {'FINISHED'}
 
 
@@ -111,7 +207,6 @@ class MYADDON_OT_create_ico_sphere(bpy.types.Operator):
     bl_description = "ICO球を生成します"
     bl_options = {'REGISTER', 'UNDO'}
 
-    # メニューを実行したときに呼ばれる関数
     def execute(self, context):
         """ICO球を生成する"""
 
@@ -128,7 +223,6 @@ class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelp
     bl_description = "シーン情報をExportします"
     bl_options = {'REGISTER', 'UNDO'}
 
-    # 出力するファイルの拡張子
     filename_ext = ".scene"
 
     def write_and_print(self, output_file, text):
@@ -226,7 +320,6 @@ class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelp
 
         print("シーン情報をExportします")
 
-        # ファイルに出力
         self.export()
 
         print("シーン情報をExportしました")
