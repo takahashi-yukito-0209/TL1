@@ -3,7 +3,7 @@ import math
 import bpy_extras
 import gpu
 import gpu_extras.batch
-import copy
+import mathutils
 
 # blenderに登録するアドオン情報 
 bl_info = {
@@ -47,11 +47,22 @@ class DrawCollider:
             [+0.5, +0.5, +0.5],
         ]
 
-        # 立方体のサイズ
-        collider_size = [2, 2, 2]
-
         # シーン内の全オブジェクトを走査
         for scene_object in bpy.context.scene.objects:
+
+            # colliderプロパティがなければ描画しない
+            if "collider" not in scene_object:
+                continue
+
+            # colliderがBOX以外なら描画しない
+            if scene_object["collider"] != "BOX":
+                continue
+
+            # 中心点
+            collider_center = scene_object["collider_center"]  # ローカル中心座標
+
+            # サイズ
+            collider_size = scene_object["collider_size"]  # ローカルサイズ
 
             # このオブジェクトの開始頂点番号
             start_vertex_index = len(vertices["pos"])
@@ -59,16 +70,18 @@ class DrawCollider:
             # Boxの8頂点分を追加
             for offset in offsets:
 
-                # オブジェクト位置をコピー
-                position = copy.copy(scene_object.location)
+                # ローカル座標でコライダー頂点を作成
+                local_position = mathutils.Vector((
+                    collider_center[0] + offset[0] * collider_size[0],
+                    collider_center[1] + offset[1] * collider_size[1],
+                    collider_center[2] + offset[2] * collider_size[2],
+                ))
 
-                # オフセットを加算して頂点座標を作成
-                position[0] += offset[0] * collider_size[0]
-                position[1] += offset[1] * collider_size[1]
-                position[2] += offset[2] * collider_size[2]
+                # オブジェクトのワールド行列を反映
+                world_position = scene_object.matrix_world @ local_position  # ワールド座標
 
                 # 頂点データに追加
-                vertices["pos"].append(position)
+                vertices["pos"].append(world_position)
 
             # 前面
             indices.append([start_vertex_index + 0, start_vertex_index + 1])
@@ -280,6 +293,31 @@ class MYADDON_OT_export_scene(bpy.types.Operator, bpy_extras.io_utils.ExportHelp
                 indent_text + "N %s" % scene_object["file_name"]
             )
 
+        # colliderカスタムプロパティがある場合だけ出力
+        if "collider" in scene_object:
+            self.write_and_print(
+                output_file,
+                indent_text + "COLLIDER %s" % scene_object["collider"]
+            )
+
+            self.write_and_print(
+                output_file,
+                indent_text + "CENTER %f %f %f" % (
+                    scene_object["collider_center"][0],
+                    scene_object["collider_center"][1],
+                    scene_object["collider_center"][2]
+                )
+            )
+
+            self.write_and_print(
+                output_file,
+                indent_text + "SIZE %f %f %f" % (
+                    scene_object["collider_size"][0],
+                    scene_object["collider_size"][1],
+                    scene_object["collider_size"][2]
+                )
+            )
+
         # オブジェクト情報の終端を出力
         self.write_and_print(output_file, indent_text + "END")
 
@@ -351,6 +389,31 @@ class MYADDON_OT_add_filename(bpy.types.Operator):
         return {'FINISHED'}
 
 
+# オペレータ colliderカスタムプロパティ追加
+class MYADDON_OT_add_collider(bpy.types.Operator):
+    bl_idname = "myaddon.myaddon_ot_add_collider"
+    bl_label = "コライダー追加"
+    bl_description = "colliderカスタムプロパティを追加します"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        """選択中オブジェクトにcolliderカスタムプロパティを追加する"""
+
+        # 選択中のオブジェクト
+        selected_object = context.object  # コライダーを追加する対象
+
+        # オブジェクトが未選択なら処理しない
+        if selected_object is None:
+            return {'CANCELLED'}
+
+        # コライダー用カスタムプロパティを追加
+        selected_object["collider"] = "BOX"
+        selected_object["collider_center"] = mathutils.Vector((0, 0, 0))
+        selected_object["collider_size"] = mathutils.Vector((2, 2, 2))
+
+        return {'FINISHED'}
+    
+
 # パネル file_name
 class OBJECT_PT_file_name(bpy.types.Panel):
     bl_idname = "OBJECT_PT_file_name"
@@ -385,13 +448,47 @@ class OBJECT_PT_file_name(bpy.types.Panel):
             layout.operator(MYADDON_OT_add_filename.bl_idname)
 
 
+# パネル collider
+class OBJECT_PT_collider(bpy.types.Panel):
+    bl_idname = "OBJECT_PT_collider"
+    bl_label = "Collider"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "object"
+
+    def draw(self, context):
+        """colliderカスタムプロパティ用のUIを表示する"""
+
+        # UIレイアウト
+        layout = self.layout
+
+        # 選択中のオブジェクト
+        selected_object = context.object  # UI表示対象
+
+        # オブジェクトが未選択なら表示しない
+        if selected_object is None:
+            return
+
+        # colliderが存在する場合は設定欄を表示
+        if "collider" in selected_object:
+            layout.prop(selected_object, '["collider"]', text="Type")
+            layout.prop(selected_object, '["collider_center"]', text="Center")
+            layout.prop(selected_object, '["collider_size"]', text="Size")
+
+        # colliderが存在しない場合は追加ボタンを表示
+        else:
+            layout.operator(MYADDON_OT_add_collider.bl_idname)
+
+
 # Blenderに登録するクラスリスト
 classes = (
     MYADDON_OT_stretch_vertex,
     MYADDON_OT_create_ico_sphere,
     MYADDON_OT_export_scene,
     MYADDON_OT_add_filename,
+    MYADDON_OT_add_collider,
     OBJECT_PT_file_name,
+    OBJECT_PT_collider,
     TOPBAR_MT_my_menu,
 )
 
